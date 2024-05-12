@@ -1,52 +1,54 @@
-import { AppRouteOptions, createExpressEndpoints, initServer } from '@ts-rest/express';
+import { createExpressEndpoints } from '@ts-rest/express';
 import express from 'express';
 import { contract, openApiDocument } from './my-api';
-// import { initialize } from 'express-openapi';
 import swaggerUi from 'swagger-ui-express';
-import { getPost, getPostRoute } from './routes/get-post';
-import { AppRoute } from '@ts-rest/core';
-import { createPost } from './routes/create-post';
-import { logRouteMiddleware } from './middleware/log-route';
+import { router } from './routes';
+import logger from 'pino-http'
+import { randomUUID } from 'crypto';
 
-const s = initServer();
-
-// type A = AppRouteOptions<typeof contract.getPost>
-
-
-
-
-// const getPostHandler: A['handler'] = async({ params: { id } }) => {
-//   // const post = prisma.post.findUnique({ where: { id } });
-
-//   return {
-//     status: 200,
-//     body: {
-//       body: 'Hello world',
-//       id,
-//       title: 'My first post',
-//     }
-//   };
+// function handle (req, res) {
+//   req.log.info('something else')
+//   res.end('hello world')
 // }
 
-const router = s.router(contract, {
-  createPost: {
-    middleware: [
-      logRouteMiddleware,
-    ],
-    handler: createPost,
-  },
-  getPost: s.route(contract.getPost, {
-    middleware: [
-      logRouteMiddleware,
-    ],
-    handler: getPost,
-  }),
-});
-
-
 const app = express()
-  .use(express.json())
-  .use('/swagger', swaggerUi.serve, swaggerUi.setup(openApiDocument));
+app.use(express.json())
+app.use(logger({
+  // Define a custom request id function
+  genReqId: function (req, res) {
+    const existingID = req.id ?? req.headers["x-request-id"]
+    if (existingID) return existingID
+    const id = randomUUID()
+    res.setHeader('X-Request-Id', id)
+    return id
+  },
+
+  // Set to `false` to prevent standard serializers from being wrapped.
+  wrapSerializers: true,
+
+  // Define a custom logger level
+  customLogLevel: function (req, res, err) {
+    if (res.statusCode >= 400 && res.statusCode < 500) {
+      return 'warn'
+    } else if (res.statusCode >= 500 || err) {
+      return 'error'
+    } else if (res.statusCode >= 300 && res.statusCode < 400) {
+      return 'silent'
+    }
+    return 'info'
+  },
+
+  // Define a custom receive message
+  customReceivedMessage: function (req, res) {
+    return 'request received'
+  },
+
+  // Define a custom error message
+  customErrorMessage: function (req, res, err) {
+    return 'request errored with status code: ' + res.statusCode
+  },
+}))
+app.use('/swagger', swaggerUi.serve, swaggerUi.setup(openApiDocument));
 app.listen(3000);
 
 createExpressEndpoints(contract, router, app);
